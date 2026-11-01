@@ -1,0 +1,79 @@
+name: WebsitePreview
+
+on:
+  workflow_run:
+    workflows: [WebsitePreviewTrigger]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+  statuses: write
+  actions: read
+
+jobs:
+  deploy-simulation:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    environment: website-preview
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Materialize synthetic privileged canary
+        env:
+          LAB_PREVIEW_CANARY: ${{ secrets.LAB_PREVIEW_CANARY }}
+        run: |
+          set -euo pipefail
+          test -n "$LAB_PREVIEW_CANARY"
+          umask 077
+          printf '%s' "$LAB_PREVIEW_CANARY" > .privileged/repo-canary.txt
+          printf '%s' "$LAB_PREVIEW_CANARY" | sha256sum | cut -d' ' -f1 > "$RUNNER_TEMP/expected.sha256"
+      - name: Vulnerable extraction positive control
+        uses: ./.github/actions/download-artifact
+        with:
+          name: website-preview-site
+          run-id: ${{ github.event.workflow_run.id }}
+          path: /tmp/site-vulnerable
+          hardened: 'false'
+      - name: Simulate preview publisher following links
+        id: vulnerable
+        run: |
+          set -euo pipefail
+          test -L /tmp/site-vulnerable/leak
+          leaked_hash="$(sha256sum /tmp/site-vulnerable/leak/repo-canary.txt | cut -d' ' -f1)"
+          expected_hash="$(cat "$RUNNER_TEMP/expected.sha256")"
+          test "$leaked_hash" = "$expected_hash"
+          jq -n \
+            --arg classification "HISTORICAL_POSITIVE_CONTROL" \
+            --arg sha256 "$leaked_hash" \
+            --arg source_run "${{ github.event.workflow_run.id }}" \
+            '{classification:$classification,sha256:$sha256,source_run:$source_run}' \
+            > "$RUNNER_TEMP/preview-evidence.json"
+          echo "canary_hash=$leaked_hash" >> "$GITHUB_OUTPUT"
+      - name: Hardened extraction negative control
+        id: hardened
+        continue-on-error: true
+        uses: ./.github/actions/download-artifact
+        with:
+          name: website-preview-site
+          run-id: ${{ github.event.workflow_run.id }}
+          path: /tmp/site-hardened
+          hardened: 'true'
+      - name: Verify hardened path rejected the artifact
+        run: test "${{ steps.hardened.outcome }}" = "failure"
+      - name: Publish hash-only preview evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="preview-${GITHUB_RUN_ID}"
+          gh release create "$tag" "$RUNNER_TEMP/preview-evidence.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Historical preview positive control ${GITHUB_RUN_ID}" \
+            --notes "Synthetic hash-only evidence: ${{ steps.vulnerable.outputs.canary_hash }}"

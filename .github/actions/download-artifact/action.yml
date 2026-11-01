@@ -1,0 +1,51 @@
+name: Download hostile artifact fixture
+description: Lab-only raw artifact download with selectable post-extraction validation
+inputs:
+  name:
+    required: true
+  run-id:
+    required: true
+  path:
+    required: true
+  hardened:
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Download raw artifact ZIP
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ARTIFACT_NAME: ${{ inputs.name }}
+        ARTIFACT_RUN_ID: ${{ inputs.run-id }}
+      with:
+        script: |
+          const runId = Number(process.env.ARTIFACT_RUN_ID)
+          if (!Number.isInteger(runId)) throw new Error('invalid run id')
+          const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            run_id: runId,
+          })
+          const artifact = artifacts.find(item => item.name === process.env.ARTIFACT_NAME)
+          if (!artifact) throw new Error(`artifact ${process.env.ARTIFACT_NAME} not found`)
+          const download = await github.rest.actions.downloadArtifact({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            artifact_id: artifact.id,
+            archive_format: 'zip',
+          })
+          require('fs').writeFileSync('/tmp/website-preview.zip', Buffer.from(download.data))
+    - name: Extract and optionally reject non-regular files
+      shell: bash
+      env:
+        ARTIFACT_PATH: ${{ inputs.path }}
+        HARDENED: ${{ inputs.hardened }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$ARTIFACT_PATH"
+        unzip -o /tmp/website-preview.zip -d "$ARTIFACT_PATH"
+        if [[ "$HARDENED" == "true" ]] && [[ -n "$(find "$ARTIFACT_PATH" -not -type d -not -type f -print -quit)" ]]; then
+          echo "Refusing artifact containing non-regular entries"
+          exit 1
+        fi
