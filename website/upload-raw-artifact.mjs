@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {pathToFileURL} from 'node:url'
 
-const [name, archivePath] = process.argv.slice(2)
+const [argName, argArchivePath] = process.argv.slice(2)
+const name = process.env.INPUT_NAME || argName
+const archivePath = process.env.INPUT_ARCHIVE || argArchivePath
 if (!name || !archivePath) throw new Error('usage: upload-raw-artifact.mjs NAME ZIP')
 if (!fs.statSync(archivePath).isFile()) throw new Error('archive path is not a file')
 

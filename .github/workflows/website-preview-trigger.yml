@@ -19,4 +19,7 @@ jobs:
       - name: Install pinned artifact client
         run: npm install --no-save --ignore-scripts --no-audit --no-fund @actions/artifact@6.3.1
       - name: Upload exact rendered-site ZIP bytes
-        run: node website/upload-raw-artifact.mjs website-preview-site website/hostile-artifact.zip
+        uses: ./website/upload-hostile
+        with:
+          name: website-preview-site
+          archive: website/hostile-artifact.zip
