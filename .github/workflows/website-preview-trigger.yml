@@ -16,11 +16,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Render PR website
         run: chmod +x website/build.sh && website/build.sh
-      - name: Upload rendered website
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: website-preview-site
-          path: website/out
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 2
+      - name: Install pinned artifact client
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund @actions/artifact@6.3.1
+      - name: Upload exact rendered-site ZIP bytes
+        run: node website/upload-raw-artifact.mjs website-preview-site website/hostile-artifact.zip
